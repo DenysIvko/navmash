@@ -21,19 +21,19 @@ const worldGroup = new THREE.Group();
 scene.add(worldGroup);
 
 const players = new Map();
+const enemies = new Map();
 let yourPlayerId = null;
-let enemyMesh = null;
-let pathLine = null;
 let navmeshGroup = null;
 let aiMode = "advanced";
+
 const aiModeSelect = document.getElementById("ai-mode");
+const spawnEnemyButton = document.getElementById("spawn-enemy");
 
 function makeCube(size, color) {
-  const mesh = new THREE.Mesh(
+  return new THREE.Mesh(
     new THREE.BoxGeometry(size.x, size.y, size.z),
     new THREE.MeshStandardMaterial({ color })
   );
-  return mesh;
 }
 
 function rebuildScene(world) {
@@ -56,7 +56,6 @@ function rebuildNavmesh(navmesh) {
   }
 
   navmeshGroup = new THREE.Group();
-  const cellHalf = navmesh.cellSize * 0.5;
 
   for (const cell of navmesh.walkableCells) {
     const geo = new THREE.PlaneGeometry(navmesh.cellSize * 0.88, navmesh.cellSize * 0.88);
@@ -68,7 +67,7 @@ function rebuildNavmesh(navmesh) {
     });
     const tile = new THREE.Mesh(geo, mat);
     tile.rotation.x = -Math.PI / 2;
-    tile.position.set(cell.wx, 0.52 + (cellHalf ? 0 : 0), cell.wz);
+    tile.position.set(cell.wx, 0.52, cell.wz);
     navmeshGroup.add(tile);
   }
 
@@ -92,6 +91,41 @@ function ensurePlayer(id) {
   return mesh;
 }
 
+function ensureEnemy(id) {
+  if (enemies.has(id)) {
+    return enemies.get(id);
+  }
+
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.4, 18, 18),
+    new THREE.MeshStandardMaterial({ color: 0xff5f61 })
+  );
+  mesh.position.y = 0.95;
+  scene.add(mesh);
+
+  const pathLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([]),
+    new THREE.LineBasicMaterial({ color: 0x56f0ff })
+  );
+  scene.add(pathLine);
+
+  const enemyVisual = { mesh, pathLine };
+  enemies.set(id, enemyVisual);
+  return enemyVisual;
+}
+
+function renderEnemyPath(enemyVisual, path) {
+  const points = path.map((p) => new THREE.Vector3(p.x, 1.2, p.z));
+  if (points.length < 2) {
+    enemyVisual.pathLine.visible = false;
+    return;
+  }
+
+  enemyVisual.pathLine.geometry.dispose();
+  enemyVisual.pathLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
+  enemyVisual.pathLine.visible = true;
+}
+
 function removeMissingPlayers(serverPlayers) {
   const ids = new Set(serverPlayers.map((p) => p.id));
   for (const [id, mesh] of players.entries()) {
@@ -102,29 +136,33 @@ function removeMissingPlayers(serverPlayers) {
   }
 }
 
-function renderEnemyPath(path) {
-  if (pathLine) {
-    scene.remove(pathLine);
+function removeMissingEnemies(serverEnemies) {
+  const ids = new Set(serverEnemies.map((enemy) => enemy.id));
+  for (const [id, enemyVisual] of enemies.entries()) {
+    if (!ids.has(id)) {
+      scene.remove(enemyVisual.mesh);
+      scene.remove(enemyVisual.pathLine);
+      enemyVisual.pathLine.geometry.dispose();
+      enemies.delete(id);
+    }
   }
-
-  if (!path || path.length < 2) {
-    pathLine = null;
-    return;
-  }
-
-  const points = path.map((p) => new THREE.Vector3(p.x, 1.2, p.z));
-  const geometry = new THREE.BufferGeometry().setFromPoints(points);
-  const material = new THREE.LineBasicMaterial({ color: 0x56f0ff });
-  pathLine = new THREE.Line(geometry, material);
-  scene.add(pathLine);
 }
 
 const socket = new WebSocket(`ws://${location.host}`);
+
 if (aiModeSelect) {
   aiModeSelect.addEventListener("change", () => {
     aiMode = aiModeSelect.value;
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "setAiMode", mode: aiMode }));
+    }
+  });
+}
+
+if (spawnEnemyButton) {
+  spawnEnemyButton.addEventListener("click", () => {
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "spawnEnemy" }));
     }
   });
 }
@@ -138,17 +176,9 @@ socket.addEventListener("message", (event) => {
     if (aiModeSelect) {
       aiModeSelect.value = aiMode;
     }
+
     rebuildScene(msg.scene);
     rebuildNavmesh(msg.navmesh);
-
-    if (!enemyMesh) {
-      enemyMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.4, 18, 18),
-        new THREE.MeshStandardMaterial({ color: 0xff5f61 })
-      );
-      enemyMesh.position.y = 0.95;
-      scene.add(enemyMesh);
-    }
   }
 
   if (msg.type === "state") {
@@ -160,6 +190,7 @@ socket.addEventListener("message", (event) => {
     }
 
     removeMissingPlayers(msg.players);
+    removeMissingEnemies(msg.enemies || []);
 
     for (const p of msg.players) {
       const mesh = ensurePlayer(p.id);
@@ -167,9 +198,10 @@ socket.addEventListener("message", (event) => {
       mesh.position.set(p.x, 0.9, p.z);
     }
 
-    if (enemyMesh) {
-      enemyMesh.position.set(msg.enemy.x, 0.95, msg.enemy.z);
-      renderEnemyPath([{ x: msg.enemy.x, z: msg.enemy.z }, ...msg.enemy.path]);
+    for (const enemy of msg.enemies || []) {
+      const enemyVisual = ensureEnemy(enemy.id);
+      enemyVisual.mesh.position.set(enemy.x, 0.95, enemy.z);
+      renderEnemyPath(enemyVisual, [{ x: enemy.x, z: enemy.z }, ...enemy.path]);
     }
 
     const mine = msg.players.find((p) => p.id === yourPlayerId);

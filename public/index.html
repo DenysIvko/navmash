@@ -45,6 +45,16 @@
         border-radius: 6px;
         padding: 2px 6px;
       }
+
+      #spawn-enemy {
+        margin-top: 8px;
+        border: 1px solid rgba(208, 218, 242, 0.25);
+        background: #1a2135;
+        color: #d8dfef;
+        border-radius: 6px;
+        padding: 4px 8px;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -59,6 +69,9 @@
           <option value="advanced">Advanced</option>
         </select>
       </label>
+      <div>
+        <button id="spawn-enemy" type="button">Spawn Enemy</button>
+      </div>
     </div>
     <script type="module" src="/main.js"></script>
   </body>

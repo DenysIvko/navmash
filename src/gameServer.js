@@ -20,15 +20,47 @@ export class GameServer {
     this.accumAiTime = 0;
     this.lastTickTime = Date.now();
     this.aiMode = AI_MODES.ADVANCED;
+    this.enemyCounter = 0;
 
-    this.enemy = {
-      x: 0,
-      z: 0,
+    this.enemies = [this.createEnemy()];
+  }
+
+  createEnemy() {
+    const spawn = this.findEnemySpawn();
+    this.enemyCounter += 1;
+    return {
+      id: `e-${this.enemyCounter}`,
+      x: spawn.x,
+      z: spawn.z,
       radius: 0.4,
       speed: ENEMY_SPEED,
       path: [],
       targetPlayerId: null
     };
+  }
+
+  findEnemySpawn() {
+    const preferred = [
+      { x: 0, z: 0 },
+      { x: -6, z: 6 },
+      { x: 6, z: -6 },
+      { x: 6, z: 6 },
+      { x: -6, z: -6 }
+    ];
+
+    for (const pos of preferred) {
+      if (isPositionWalkable(this.navmesh, pos)) {
+        return pos;
+      }
+    }
+
+    const walkable = this.navmesh.walkableCells;
+    if (walkable.length > 0) {
+      const picked = walkable[Math.floor(Math.random() * walkable.length)];
+      return { x: picked.wx, z: picked.wz };
+    }
+
+    return { x: 0, z: 0 };
   }
 
   start() {
@@ -81,9 +113,11 @@ export class GameServer {
     ws.on("close", () => {
       this.clients.delete(id);
       this.players.delete(id);
-      if (this.enemy.targetPlayerId === id) {
-        this.enemy.targetPlayerId = null;
-        this.enemy.path = [];
+      for (const enemy of this.enemies) {
+        if (enemy.targetPlayerId === id) {
+          enemy.targetPlayerId = null;
+          enemy.path = [];
+        }
       }
     });
   }
@@ -92,8 +126,14 @@ export class GameServer {
     if (msg.type === "setAiMode") {
       if (msg.mode === AI_MODES.DEFAULT || msg.mode === AI_MODES.ADVANCED) {
         this.aiMode = msg.mode;
-        this.refreshEnemyPath();
+        this.refreshEnemyPaths();
       }
+      return;
+    }
+
+    if (msg.type === "spawnEnemy") {
+      this.enemies.push(this.createEnemy());
+      this.refreshEnemyPaths();
       return;
     }
 
@@ -141,19 +181,23 @@ export class GameServer {
     this.accumAiTime += dt;
     if (this.accumAiTime >= AI_REPATH_INTERVAL) {
       this.accumAiTime = 0;
-      this.refreshEnemyPath();
+      this.refreshEnemyPaths();
     }
-    this.integrateEnemy(dt);
+
+    for (const enemy of this.enemies) {
+      this.integrateEnemy(enemy, dt);
+    }
 
     const snapshot = {
       type: "state",
       players: [...this.players.values()].map((p) => ({ id: p.id, x: p.x, z: p.z })),
-      enemy: {
-        x: this.enemy.x,
-        z: this.enemy.z,
-        targetPlayerId: this.enemy.targetPlayerId,
-        path: this.enemy.path
-      },
+      enemies: this.enemies.map((enemy) => ({
+        id: enemy.id,
+        x: enemy.x,
+        z: enemy.z,
+        targetPlayerId: enemy.targetPlayerId,
+        path: enemy.path
+      })),
       aiMode: this.aiMode
     };
 
@@ -188,9 +232,9 @@ export class GameServer {
     }
   }
 
-  getInterceptTime(enemyPos, targetPos, targetVel) {
-    const rx = targetPos.x - enemyPos.x;
-    const rz = targetPos.z - enemyPos.z;
+  getInterceptTime(enemy, targetPos, targetVel) {
+    const rx = targetPos.x - enemy.x;
+    const rz = targetPos.z - enemy.z;
     const rr = rx * rx + rz * rz;
     if (rr < 1e-6) {
       return 0;
@@ -199,7 +243,7 @@ export class GameServer {
     const vx = targetVel.x;
     const vz = targetVel.z;
     const vv = vx * vx + vz * vz;
-    const speed = this.enemy.speed;
+    const speed = enemy.speed;
 
     // ||r + v*t|| = speed*t -> (v.v - s^2)t^2 + 2(r.v)t + r.r = 0
     const a = vv - speed * speed;
@@ -231,11 +275,17 @@ export class GameServer {
     return Math.max(0, Math.min(t, MAX_LEAD_TIME));
   }
 
-  refreshEnemyPath() {
+  refreshEnemyPaths() {
+    for (const enemy of this.enemies) {
+      this.refreshEnemyPath(enemy);
+    }
+  }
+
+  refreshEnemyPath(enemy) {
     const players = [...this.players.values()];
     if (players.length === 0) {
-      this.enemy.targetPlayerId = null;
-      this.enemy.path = [];
+      enemy.targetPlayerId = null;
+      enemy.path = [];
       return;
     }
 
@@ -246,8 +296,8 @@ export class GameServer {
 
     for (const p of players) {
       if (this.aiMode === AI_MODES.DEFAULT) {
-        const dx = p.x - this.enemy.x;
-        const dz = p.z - this.enemy.z;
+        const dx = p.x - enemy.x;
+        const dz = p.z - enemy.z;
         const distSq = dx * dx + dz * dz;
         if (distSq < bestDistSq) {
           best = p;
@@ -257,11 +307,7 @@ export class GameServer {
         continue;
       }
 
-      const interceptTime = this.getInterceptTime(
-        { x: this.enemy.x, z: this.enemy.z },
-        { x: p.x, z: p.z },
-        { x: p.vx, z: p.vz }
-      );
+      const interceptTime = this.getInterceptTime(enemy, { x: p.x, z: p.z }, { x: p.vx, z: p.vz });
       const predictedTarget = {
         x: p.x + p.vx * interceptTime,
         z: p.z + p.vz * interceptTime
@@ -274,37 +320,37 @@ export class GameServer {
       }
     }
 
-    this.enemy.targetPlayerId = best.id;
-    this.enemy.path = findPath(this.navmesh, { x: this.enemy.x, z: this.enemy.z }, bestTarget);
+    enemy.targetPlayerId = best.id;
+    enemy.path = findPath(this.navmesh, { x: enemy.x, z: enemy.z }, bestTarget);
   }
 
-  integrateEnemy(dt) {
-    if (this.enemy.path.length === 0) {
+  integrateEnemy(enemy, dt) {
+    if (enemy.path.length === 0) {
       return;
     }
 
-    let remaining = this.enemy.speed * dt;
+    let remaining = enemy.speed * dt;
 
-    while (remaining > 0 && this.enemy.path.length > 0) {
-      const target = this.enemy.path[0];
-      const dx = target.x - this.enemy.x;
-      const dz = target.z - this.enemy.z;
+    while (remaining > 0 && enemy.path.length > 0) {
+      const target = enemy.path[0];
+      const dx = target.x - enemy.x;
+      const dz = target.z - enemy.z;
       const dist = Math.hypot(dx, dz);
 
       if (dist < 0.0001) {
-        this.enemy.path.shift();
+        enemy.path.shift();
         continue;
       }
 
       if (remaining >= dist) {
-        this.enemy.x = target.x;
-        this.enemy.z = target.z;
+        enemy.x = target.x;
+        enemy.z = target.z;
         remaining -= dist;
-        this.enemy.path.shift();
+        enemy.path.shift();
       } else {
         const t = remaining / dist;
-        this.enemy.x += dx * t;
-        this.enemy.z += dz * t;
+        enemy.x += dx * t;
+        enemy.z += dz * t;
         remaining = 0;
       }
     }

@@ -5,6 +5,7 @@ const PLAYER_SPEED = 5;
 const PLAYER_RADIUS = 0.35;
 const ENEMY_SPEED = 3.2;
 const AI_REPATH_INTERVAL = 0.1;
+const MAX_LEAD_TIME = 2.5;
 
 export class GameServer {
   constructor() {
@@ -42,6 +43,8 @@ export class GameServer {
       id,
       x: spawn.x,
       z: spawn.z,
+      vx: 0,
+      vz: 0,
       radius: PLAYER_RADIUS,
       speed: PLAYER_SPEED,
       input: { x: 0, z: 0 }
@@ -148,6 +151,9 @@ export class GameServer {
   }
 
   integratePlayer(player, dt) {
+    const prevX = player.x;
+    const prevZ = player.z;
+
     const desiredX = player.x + player.input.x * player.speed * dt;
     const desiredZ = player.z + player.input.z * player.speed * dt;
 
@@ -160,6 +166,54 @@ export class GameServer {
     if (isPositionWalkable(this.navmesh, stepZ)) {
       player.z = stepZ.z;
     }
+
+    if (dt > 0) {
+      player.vx = (player.x - prevX) / dt;
+      player.vz = (player.z - prevZ) / dt;
+    }
+  }
+
+  getInterceptTime(enemyPos, targetPos, targetVel) {
+    const rx = targetPos.x - enemyPos.x;
+    const rz = targetPos.z - enemyPos.z;
+    const rr = rx * rx + rz * rz;
+    if (rr < 1e-6) {
+      return 0;
+    }
+
+    const vx = targetVel.x;
+    const vz = targetVel.z;
+    const vv = vx * vx + vz * vz;
+    const speed = this.enemy.speed;
+
+    // ||r + v*t|| = speed*t -> (v.v - s^2)t^2 + 2(r.v)t + r.r = 0
+    const a = vv - speed * speed;
+    const b = 2 * (rx * vx + rz * vz);
+    const c = rr;
+
+    let t = Math.sqrt(rr) / Math.max(speed, 1e-6);
+
+    if (Math.abs(a) < 1e-6) {
+      if (Math.abs(b) > 1e-6) {
+        const linearT = -c / b;
+        if (linearT > 0) {
+          t = linearT;
+        }
+      }
+    } else {
+      const disc = b * b - 4 * a * c;
+      if (disc >= 0) {
+        const sqrtDisc = Math.sqrt(disc);
+        const t1 = (-b - sqrtDisc) / (2 * a);
+        const t2 = (-b + sqrtDisc) / (2 * a);
+        const valid = [t1, t2].filter((value) => value > 0);
+        if (valid.length > 0) {
+          t = Math.min(...valid);
+        }
+      }
+    }
+
+    return Math.max(0, Math.min(t, MAX_LEAD_TIME));
   }
 
   refreshEnemyPath() {
@@ -171,20 +225,29 @@ export class GameServer {
     }
 
     let best = players[0];
-    let bestDistSq = Number.POSITIVE_INFINITY;
+    let bestLeadTarget = { x: best.x, z: best.z };
+    let bestInterceptTime = Number.POSITIVE_INFINITY;
 
     for (const p of players) {
-      const dx = p.x - this.enemy.x;
-      const dz = p.z - this.enemy.z;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < bestDistSq) {
+      const interceptTime = this.getInterceptTime(
+        { x: this.enemy.x, z: this.enemy.z },
+        { x: p.x, z: p.z },
+        { x: p.vx, z: p.vz }
+      );
+      const leadTarget = {
+        x: p.x + p.vx * interceptTime,
+        z: p.z + p.vz * interceptTime
+      };
+
+      if (interceptTime < bestInterceptTime) {
         best = p;
-        bestDistSq = d2;
+        bestLeadTarget = leadTarget;
+        bestInterceptTime = interceptTime;
       }
     }
 
     this.enemy.targetPlayerId = best.id;
-    this.enemy.path = findPath(this.navmesh, { x: this.enemy.x, z: this.enemy.z }, best);
+    this.enemy.path = findPath(this.navmesh, { x: this.enemy.x, z: this.enemy.z }, bestLeadTarget);
   }
 
   integrateEnemy(dt) {

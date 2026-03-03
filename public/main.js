@@ -25,6 +25,8 @@ let yourPlayerId = null;
 let enemyMesh = null;
 let pathLine = null;
 let navmeshGroup = null;
+let aiMode = "advanced";
+const aiModeSelect = document.getElementById("ai-mode");
 
 function makeCube(size, color) {
   const mesh = new THREE.Mesh(
@@ -118,12 +120,24 @@ function renderEnemyPath(path) {
 }
 
 const socket = new WebSocket(`ws://${location.host}`);
+if (aiModeSelect) {
+  aiModeSelect.addEventListener("change", () => {
+    aiMode = aiModeSelect.value;
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "setAiMode", mode: aiMode }));
+    }
+  });
+}
 
 socket.addEventListener("message", (event) => {
   const msg = JSON.parse(event.data);
 
   if (msg.type === "init") {
     yourPlayerId = msg.yourPlayerId;
+    aiMode = msg.aiMode || aiMode;
+    if (aiModeSelect) {
+      aiModeSelect.value = aiMode;
+    }
     rebuildScene(msg.scene);
     rebuildNavmesh(msg.navmesh);
 
@@ -138,6 +152,13 @@ socket.addEventListener("message", (event) => {
   }
 
   if (msg.type === "state") {
+    if (msg.aiMode && msg.aiMode !== aiMode) {
+      aiMode = msg.aiMode;
+      if (aiModeSelect) {
+        aiModeSelect.value = aiMode;
+      }
+    }
+
     removeMissingPlayers(msg.players);
 
     for (const p of msg.players) {

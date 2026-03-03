@@ -6,6 +6,10 @@ const PLAYER_RADIUS = 0.35;
 const ENEMY_SPEED = 3.2;
 const AI_REPATH_INTERVAL = 0.1;
 const MAX_LEAD_TIME = 2.5;
+const AI_MODES = {
+  DEFAULT: "default",
+  ADVANCED: "advanced"
+};
 
 export class GameServer {
   constructor() {
@@ -15,6 +19,7 @@ export class GameServer {
     this.players = new Map();
     this.accumAiTime = 0;
     this.lastTickTime = Date.now();
+    this.aiMode = AI_MODES.ADVANCED;
 
     this.enemy = {
       x: 0,
@@ -53,6 +58,7 @@ export class GameServer {
     ws.send(JSON.stringify({
       type: "init",
       yourPlayerId: id,
+      aiMode: this.aiMode,
       scene: this.scene,
       navmesh: {
         cellSize: this.navmesh.cellSize,
@@ -83,6 +89,14 @@ export class GameServer {
   }
 
   handleMessage(playerId, msg) {
+    if (msg.type === "setAiMode") {
+      if (msg.mode === AI_MODES.DEFAULT || msg.mode === AI_MODES.ADVANCED) {
+        this.aiMode = msg.mode;
+        this.refreshEnemyPath();
+      }
+      return;
+    }
+
     if (msg.type !== "input") {
       return;
     }
@@ -139,7 +153,8 @@ export class GameServer {
         z: this.enemy.z,
         targetPlayerId: this.enemy.targetPlayerId,
         path: this.enemy.path
-      }
+      },
+      aiMode: this.aiMode
     };
 
     const payload = JSON.stringify(snapshot);
@@ -225,29 +240,42 @@ export class GameServer {
     }
 
     let best = players[0];
-    let bestLeadTarget = { x: best.x, z: best.z };
+    let bestTarget = { x: best.x, z: best.z };
     let bestInterceptTime = Number.POSITIVE_INFINITY;
+    let bestDistSq = Number.POSITIVE_INFINITY;
 
     for (const p of players) {
+      if (this.aiMode === AI_MODES.DEFAULT) {
+        const dx = p.x - this.enemy.x;
+        const dz = p.z - this.enemy.z;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < bestDistSq) {
+          best = p;
+          bestTarget = { x: p.x, z: p.z };
+          bestDistSq = distSq;
+        }
+        continue;
+      }
+
       const interceptTime = this.getInterceptTime(
         { x: this.enemy.x, z: this.enemy.z },
         { x: p.x, z: p.z },
         { x: p.vx, z: p.vz }
       );
-      const leadTarget = {
+      const predictedTarget = {
         x: p.x + p.vx * interceptTime,
         z: p.z + p.vz * interceptTime
       };
 
       if (interceptTime < bestInterceptTime) {
         best = p;
-        bestLeadTarget = leadTarget;
+        bestTarget = predictedTarget;
         bestInterceptTime = interceptTime;
       }
     }
 
     this.enemy.targetPlayerId = best.id;
-    this.enemy.path = findPath(this.navmesh, { x: this.enemy.x, z: this.enemy.z }, bestLeadTarget);
+    this.enemy.path = findPath(this.navmesh, { x: this.enemy.x, z: this.enemy.z }, bestTarget);
   }
 
   integrateEnemy(dt) {

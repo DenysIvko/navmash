@@ -124,20 +124,112 @@ export function findNearestWalkableCell(navmesh, startCell, maxRadius = 10) {
 }
 
 function heuristic(a, b) {
-  return Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
+  const dx = Math.abs(a.x - b.x);
+  const dz = Math.abs(a.z - b.z);
+  const min = Math.min(dx, dz);
+  const max = Math.max(dx, dz);
+  return Math.SQRT2 * min + (max - min);
 }
 
 function key(cell) {
   return `${cell.x},${cell.z}`;
 }
 
-function neighbors(cell) {
-  return [
-    { x: cell.x + 1, z: cell.z },
-    { x: cell.x - 1, z: cell.z },
-    { x: cell.x, z: cell.z + 1 },
-    { x: cell.x, z: cell.z - 1 }
+function neighbors(navmesh, cell) {
+  const cardinal = [
+    { x: 1, z: 0, cost: 1 },
+    { x: -1, z: 0, cost: 1 },
+    { x: 0, z: 1, cost: 1 },
+    { x: 0, z: -1, cost: 1 }
   ];
+  const diagonal = [
+    { x: 1, z: 1, cost: Math.SQRT2 },
+    { x: 1, z: -1, cost: Math.SQRT2 },
+    { x: -1, z: 1, cost: Math.SQRT2 },
+    { x: -1, z: -1, cost: Math.SQRT2 }
+  ];
+
+  const result = [];
+
+  for (const step of cardinal) {
+    const next = { x: cell.x + step.x, z: cell.z + step.z };
+    if (isWalkable(navmesh, next)) {
+      result.push({ cell: next, cost: step.cost });
+    }
+  }
+
+  for (const step of diagonal) {
+    const next = { x: cell.x + step.x, z: cell.z + step.z };
+    if (!isWalkable(navmesh, next)) {
+      continue;
+    }
+
+    // Prevent diagonal corner-cutting through blocked cells.
+    const sideA = { x: cell.x + step.x, z: cell.z };
+    const sideB = { x: cell.x, z: cell.z + step.z };
+    if (!isWalkable(navmesh, sideA) || !isWalkable(navmesh, sideB)) {
+      continue;
+    }
+
+    result.push({ cell: next, cost: step.cost });
+  }
+
+  return result;
+}
+
+function hasLineOfSight(navmesh, from, to) {
+  const dx = to.x - from.x;
+  const dz = to.z - from.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist < 1e-6) {
+    return true;
+  }
+
+  // Sample along the segment in small increments and keep every sample on walkable space.
+  const step = navmesh.cellSize * 0.2;
+  const samples = Math.max(1, Math.ceil(dist / step));
+  for (let i = 0; i <= samples; i += 1) {
+    const t = i / samples;
+    const p = {
+      x: from.x + dx * t,
+      z: from.z + dz * t
+    };
+    if (!isPositionWalkable(navmesh, p)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function smoothPath(navmesh, startPos, endPos, cellPath) {
+  if (cellPath.length === 0) {
+    return [];
+  }
+
+  // Build targets from cell centers plus exact target position.
+  const targets = [...cellPath.map((cell) => gridToWorld(navmesh, cell)), { x: endPos.x, z: endPos.z }];
+  const smoothed = [];
+
+  let current = { x: startPos.x, z: startPos.z };
+  let cursor = 0;
+
+  while (cursor < targets.length) {
+    let furthest = cursor;
+    for (let i = targets.length - 1; i > cursor; i -= 1) {
+      if (hasLineOfSight(navmesh, current, targets[i])) {
+        furthest = i;
+        break;
+      }
+    }
+
+    const next = targets[furthest];
+    smoothed.push(next);
+    current = next;
+    cursor = furthest + 1;
+  }
+
+  return smoothed;
 }
 
 export function findPath(navmesh, startPos, endPos) {
@@ -176,19 +268,15 @@ export function findPath(navmesh, startPos, endPos) {
         k = key(prev);
       }
       cells.reverse();
-      return cells.map((cell) => gridToWorld(navmesh, cell));
+      return smoothPath(navmesh, startPos, endPos, cells.slice(1));
     }
 
     open.splice(currentIndex, 1);
     const currentKey = key(current);
 
-    for (const n of neighbors(current)) {
-      if (!isWalkable(navmesh, n)) {
-        continue;
-      }
-
+    for (const { cell: n, cost } of neighbors(navmesh, current)) {
       const nKey = key(n);
-      const tentative = (gScore.get(currentKey) ?? Number.POSITIVE_INFINITY) + 1;
+      const tentative = (gScore.get(currentKey) ?? Number.POSITIVE_INFINITY) + cost;
       if (tentative < (gScore.get(nKey) ?? Number.POSITIVE_INFINITY)) {
         cameFrom.set(nKey, current);
         gScore.set(nKey, tentative);

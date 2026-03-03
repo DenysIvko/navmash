@@ -4,12 +4,12 @@ import { sceneDefinition } from "./scene.js";
 const PLAYER_SPEED = 5;
 const PLAYER_RADIUS = 0.35;
 const ENEMY_SPEED = 3.2;
-const AI_REPATH_INTERVAL = 0.35;
+const AI_REPATH_INTERVAL = 0.1;
 
 export class GameServer {
   constructor() {
     this.scene = sceneDefinition;
-    this.navmesh = bakeNavmesh(this.scene, { cellSize: 1, agentRadius: PLAYER_RADIUS });
+    this.navmesh = bakeNavmesh(this.scene, { cellSize: 0.5, agentRadius: PLAYER_RADIUS });
     this.clients = new Map();
     this.players = new Map();
     this.accumAiTime = 0;
@@ -184,7 +184,7 @@ export class GameServer {
     }
 
     this.enemy.targetPlayerId = best.id;
-    this.enemy.path = findPath(this.navmesh, { x: this.enemy.x, z: this.enemy.z }, best).slice(1);
+    this.enemy.path = findPath(this.navmesh, { x: this.enemy.x, z: this.enemy.z }, best);
   }
 
   integrateEnemy(dt) {

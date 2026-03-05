@@ -1,21 +1,49 @@
-# Frontend
+# Frontend (React + Vite)
 
-Browser client for rendering scene, sending input, and UI controls.
+Modernized UI client for Navmash.
+
+## Architecture
+
+- `src/core` - runtime config + protocol constants
+- `src/network` - WebSocket transport client
+- `src/input` - keyboard intent controller
+- `src/store` - app state store and subscriptions
+- `src/render` - Three.js world renderer
+- `src/app` - application composition/orchestration
+- `src/ui` - React UI components/styles
+
+This keeps responsibilities separate and testable.
 
 ## Run
 
+From repo root:
+
 ```bash
+npm install
 npm start
 ```
 
-Serves static files at `http://localhost:5173`.
+Or frontend only:
 
-## Backend connection
+```bash
+cd frontend
+npm install
+npm start
+```
 
-By default, frontend connects to:
+Frontend URL: `http://localhost:5173`
 
-- `ws://localhost:3000`
+## Backend Connection
+
+Defaults to:
+
+- `ws://<current-hostname>:3000`
 
 Override with query params:
 
-- `?backendHost=localhost&backendPort=3000`
+- `backendHost`
+- `backendPort`
+
+Example:
+
+`http://localhost:5173/?backendHost=localhost&backendPort=3000`

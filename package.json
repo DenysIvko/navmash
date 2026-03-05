@@ -1,8 +1,11 @@
 {
   "name": "navmash-workspace",
   "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
   "scripts": {
-    "setup": "npm --prefix backend install && npm --prefix frontend install",
-    "start": "npm --prefix backend start & npm --prefix frontend start & wait"
+    "start": "npm run start -w backend & npm run start -w frontend & wait"
   }
 }

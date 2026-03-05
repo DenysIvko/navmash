@@ -41,12 +41,12 @@ The project demonstrates:
 - Node.js 18+
 - npm
 
-### One-command setup + run (recommended)
+### One-command install + run (recommended)
 
 From repo root:
 
 ```bash
-npm run setup
+npm install
 npm start
 ```
 
@@ -87,10 +87,17 @@ navmash/
     package.json
     README.md
   frontend/
-    public/
-      index.html        # HUD + canvas shell
-      main.js           # Three.js rendering + networking + controls
-    server.js           # static file server
+    src/
+      app/              # application composition/orchestration
+      core/             # runtime config + protocol constants
+      input/            # keyboard intent controller
+      network/          # WebSocket transport client
+      render/           # Three.js world renderer
+      store/            # frontend state store
+      ui/               # React components + CSS
+      main.jsx          # React entrypoint
+    index.html          # Vite entry HTML
+    vite.config.js      # Vite config
     package.json
     README.md
   package.json          # root scripts to run both projects
@@ -271,7 +278,12 @@ This is a grid-based navmesh derived from primitive scene geometry:
 
 ## 10. Frontend Behavior
 
-The frontend is deliberately thin:
+Frontend stack:
+
+- React + Vite for app shell and UI state
+- Three.js for 3D world rendering
+
+Behavior:
 
 - Renders scene, navmesh overlay, players, enemies, and enemy paths
 - Captures keyboard input (`W/A/S/D`) and sends vectors

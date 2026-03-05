@@ -6,7 +6,9 @@ import { GameServer } from "./gameServer.js";
 const PORT = process.env.PORT || 3000;
 
 const app = express();
-app.use(express.static("public"));
+app.get("/health", (_req, res) => {
+  res.json({ ok: true });
+});
 
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
@@ -20,7 +22,7 @@ wss.on("connection", (ws) => {
 
 server.listen(PORT, () => {
   // eslint-disable-next-line no-console
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Backend running on http://localhost:${PORT}`);
   // eslint-disable-next-line no-console
   console.log(`Navmesh cells: ${game.navmesh.walkableCells.length}`);
 });

@@ -29,6 +29,10 @@ let aiMode = "advanced";
 const aiModeSelect = document.getElementById("ai-mode");
 const spawnEnemyButton = document.getElementById("spawn-enemy");
 
+const backendHost = new URLSearchParams(window.location.search).get("backendHost") || window.location.hostname || "localhost";
+const backendPort = new URLSearchParams(window.location.search).get("backendPort") || "3000";
+const socket = new WebSocket(`ws://${backendHost}:${backendPort}`);
+
 function makeCube(size, color) {
   return new THREE.Mesh(
     new THREE.BoxGeometry(size.x, size.y, size.z),
@@ -147,8 +151,6 @@ function removeMissingEnemies(serverEnemies) {
     }
   }
 }
-
-const socket = new WebSocket(`ws://${location.host}`);
 
 if (aiModeSelect) {
   aiModeSelect.addEventListener("change", () => {

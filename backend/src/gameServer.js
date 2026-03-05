@@ -14,7 +14,7 @@ const AI_MODES = {
 export class GameServer {
   constructor() {
     this.scene = sceneDefinition;
-    this.navmesh = bakeNavmesh(this.scene, { cellSize: 0.5, agentRadius: PLAYER_RADIUS });
+    this.navmesh = bakeNavmesh(this.scene, { cellSize: 1, agentRadius: PLAYER_RADIUS });
     this.clients = new Map();
     this.players = new Map();
     this.accumAiTime = 0;
